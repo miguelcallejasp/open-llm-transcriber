@@ -30,6 +30,7 @@ import shutil
 import socketserver
 import sys
 import tempfile
+import threading
 
 import whisper
 
@@ -54,6 +55,32 @@ logging.basicConfig(
 log = logging.getLogger("whisper-server")
 
 MODEL: "whisper.Whisper | None" = None
+
+# The server has no authentication by design — it is meant to be reached only
+# from this machine. To keep it that way we accept requests whose Host/Origin
+# resolve to localhost (plus whatever address we were told to bind to). This
+# blocks DNS-rebinding and cross-site POSTs from other pages in the browser.
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", HOST}
+
+# Whisper's transcribe() is not safe to call concurrently on a shared model, and
+# ThreadingTCPServer can dispatch overlapping requests, so serialize them.
+TRANSCRIBE_LOCK = threading.Lock()
+
+
+def _host_only(value: str) -> str:
+    """Return just the hostname from a Host or Origin header value.
+
+    Strips any scheme, path, and ``:port`` (handling ``[::1]:8765`` too).
+    """
+    value = value.strip()
+    if "://" in value:               # Origin carries a scheme
+        value = value.split("://", 1)[1]
+    value = value.split("/", 1)[0]   # drop any path
+    if value.startswith("["):        # bracketed IPv6, e.g. [::1]:8765
+        return value[1:].split("]", 1)[0]
+    if ":" in value:                 # strip :port
+        value = value.rsplit(":", 1)[0]
+    return value
 
 
 def _check_ffmpeg() -> None:
@@ -100,6 +127,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
             return
 
+        # Only accept requests that originate from this machine (see ALLOWED_HOSTS).
+        host = _host_only(self.headers.get("Host", ""))
+        if host and host not in ALLOWED_HOSTS:
+            self._send_json(403, {"error": "Forbidden"})
+            return
+        origin = self.headers.get("Origin")
+        if origin and _host_only(origin) not in ALLOWED_HOSTS:
+            self._send_json(403, {"error": "Forbidden"})
+            return
+
         # Validate the upload size before reading the body.
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -127,7 +164,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if language and language != "auto":
                 kwargs["language"] = language
             log.info("Transcribing (%s)...", language)
-            result = MODEL.transcribe(audio_path, **kwargs)
+            with TRANSCRIBE_LOCK:
+                result = MODEL.transcribe(audio_path, **kwargs)
             text = result["text"].strip()
             detected = result.get("language", language)
 
@@ -138,9 +176,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             log.info("Done -> %s", out_path)
 
             self._send_json(200, {"text": text, "language": detected, "saved": out_path})
-        except Exception as exc:  # noqa: BLE001 - surface any error to the page
+        except Exception:  # noqa: BLE001 - never leak internals to the page
             log.exception("Transcription failed")
-            self._send_json(500, {"error": str(exc)})
+            self._send_json(500, {"error": "Transcription failed — see server logs."})
         finally:
             os.unlink(audio_path)
 
