@@ -207,6 +207,21 @@ transcribed offline, and never uploaded anywhere. Saved transcripts in
 
 ---
 
+## Credits & third-party licenses
+
+This project's own code is MIT-licensed (below). It also relies on third-party
+components that retain their own licenses:
+
+- **[OpenAI Whisper](https://github.com/openai/whisper)** — the speech model and
+  library, MIT License.
+- **[ffmpeg](https://ffmpeg.org)** — system dependency you install yourself
+  (not bundled); used by Whisper to decode audio.
+- **[Cascadia Code](https://github.com/microsoft/cascadia-code)** — the bundled
+  UI font (`web/fonts/`), © Microsoft, licensed under the SIL Open Font License
+  1.1. See [`web/fonts/Cascadia-Code-LICENSE.txt`](web/fonts/Cascadia-Code-LICENSE.txt).
+
+---
+
 ## License
 
 [MIT](LICENSE) © 2026 Miguel Callejas.
