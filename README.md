@@ -1,4 +1,4 @@
-# Whisper Local 🎙️
+# Open LLM Transcriber 🎙️
 
 A tiny, fully-local voice transcription app. Record from your microphone in the
 browser, transcribe it on your own machine with OpenAI's
@@ -19,12 +19,12 @@ browser, transcribe it on your own machine with OpenAI's
 One line — clone and run the installer:
 
 ```bash
-git clone https://github.com/miguelcallejasp/Whisper.git && cd Whisper && ./install.sh
+git clone https://github.com/miguelcallejasp/open-llm-transcriber.git && cd open-llm-transcriber && ./install.sh
 ```
 
 `install.sh` checks your tools, installs **ffmpeg** if needed, creates a virtual
-environment, installs dependencies, and builds the **Whisper Local** Dock app.
-When it finishes, drag `Whisper Local.app` onto your Dock — from then on a single
+environment, installs dependencies, and builds the **Open LLM Transcriber** Dock app.
+When it finishes, drag `Open LLM Transcriber.app` onto your Dock — from then on a single
 click launches the server and opens the app in your browser.
 
 > Prefer to do it by hand, or on Linux? See [Manual install](#manual-install).
@@ -76,8 +76,8 @@ recording after the first is fast. For a deeper dive see
 
 ```bash
 # 1. Clone
-git clone https://github.com/miguelcallejasp/Whisper.git
-cd Whisper
+git clone https://github.com/miguelcallejasp/open-llm-transcriber.git
+cd open-llm-transcriber
 
 # 2. Install ffmpeg (Whisper needs it to decode audio)
 brew install ffmpeg            # macOS
@@ -151,10 +151,10 @@ To add languages, add `<option>`s to the `#language` dropdown in
 `install.sh` builds it for you, or rebuild it any time:
 
 ```bash
-./build-app.sh      # creates "Whisper Local.app"
+./build-app.sh      # creates "Open LLM Transcriber.app"
 ```
 
-Then drag `Whisper Local.app` onto your Dock. Clicking it opens a Terminal
+Then drag `Open LLM Transcriber.app` onto your Dock. Clicking it opens a Terminal
 running the server and pops your browser at the app.
 
 > On first launch macOS asks for permission to control Terminal — click OK.

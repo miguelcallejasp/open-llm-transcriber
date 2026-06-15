@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build the "Whisper Local.app" macOS launcher with its custom icon.
+# Build the "Open LLM Transcriber.app" macOS launcher with its custom icon.
 # Safe to re-run; it rebuilds from scratch.
 set -e
 cd "$(dirname "$0")"
 ROOT="$PWD"
-APP="Whisper Local.app"
+APP="Open LLM Transcriber.app"
 
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [ -x "$CHROME" ]; then

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Whisper Local — one-line installer (macOS).
+# Open LLM Transcriber — one-line installer (macOS).
 #
 # Verifies prerequisites, installs ffmpeg if needed, creates a virtual
 # environment, installs Python dependencies, and builds the Dock app.
 #
-#   git clone <repo> && cd Whisper && ./install.sh
+#   git clone <repo> && cd open-llm-transcriber && ./install.sh
 set -e
 cd "$(dirname "$0")"
 
@@ -13,7 +13,7 @@ ok()    { printf "  \033[32m✓\033[0m %s\n" "$1"; }
 warn()  { printf "  \033[33m!\033[0m %s\n" "$1"; }
 fail()  { printf "  \033[31m✗\033[0m %s\n" "$1"; exit 1; }
 
-bold "Whisper Local — installer"
+bold "Open LLM Transcriber — installer"
 echo
 
 # --- 1. Platform ------------------------------------------------------------
@@ -65,12 +65,12 @@ bold "Downloading the Whisper '$MODEL' model (cached in ~/.cache/whisper)…"
 # --- 6. Build the Dock app --------------------------------------------------
 bold "Building the macOS Dock app…"
 if ./build-app.sh; then
-  ok "Whisper Local.app built"
+  ok "Open LLM Transcriber.app built"
 else
   warn "Dock app build failed — you can still run ./start.sh manually"
 fi
 
 echo
 bold "All set! 🎉"
-echo "  • Drag \"Whisper Local.app\" onto your Dock for one-click access, or"
+echo "  • Drag \"Open LLM Transcriber.app\" onto your Dock for one-click access, or"
 echo "  • run ./start.sh to launch right now."
