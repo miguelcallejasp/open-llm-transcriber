@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0;background:transparent}
+  svg{display:block}
+</style></head><body>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08323d"/>
+      <stop offset="0.5" stop-color="#041820"/>
+      <stop offset="1" stop-color="#02070b"/>
+    </linearGradient>
+    <radialGradient id="glowbg" cx="0.5" cy="0.32" r="0.7">
+      <stop offset="0" stop-color="#0bd6ec" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#0bd6ec" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mic" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#aef9ff"/>
+      <stop offset="0.45" stop-color="#2ff3ff"/>
+      <stop offset="1" stop-color="#0c9fb4"/>
+    </linearGradient>
+    <linearGradient id="lineA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffb24d"/>
+      <stop offset="1" stop-color="#ff7a14"/>
+    </linearGradient>
+    <filter id="cyGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="orGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- rounded-square (squircle-ish) base -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#glowbg)"/>
+
+  <!-- faint perspective grid -->
+  <g stroke="#2ff3ff" stroke-opacity="0.07" stroke-width="2">
+    <line x1="0" y1="300" x2="1024" y2="300"/>
+    <line x1="0" y1="500" x2="1024" y2="500"/>
+    <line x1="0" y1="700" x2="1024" y2="700"/>
+    <line x1="220" y1="0" x2="220" y2="1024"/>
+    <line x1="512" y1="0" x2="512" y2="1024"/>
+    <line x1="804" y1="0" x2="804" y2="1024"/>
+  </g>
+  <!-- inner border ring -->
+  <rect x="24" y="24" width="976" height="976" rx="206" fill="none"
+        stroke="#2ff3ff" stroke-opacity="0.18" stroke-width="3"/>
+
+  <!-- microphone -->
+  <g filter="url(#cyGlow)">
+    <!-- capsule -->
+    <rect x="397" y="150" width="230" height="384" rx="115" fill="url(#mic)"/>
+    <!-- capsule highlight -->
+    <rect x="430" y="186" width="60" height="250" rx="30" fill="#ffffff" fill-opacity="0.28"/>
+    <!-- cradle -->
+    <path d="M334 420 v44 a178 178 0 0 0 356 0 v-44" fill="none"
+          stroke="#2ff3ff" stroke-width="34" stroke-linecap="round"/>
+    <!-- stem -->
+    <line x1="512" y1="642" x2="512" y2="700" stroke="#2ff3ff" stroke-width="32" stroke-linecap="round"/>
+    <!-- base -->
+    <line x1="416" y1="704" x2="608" y2="704" stroke="#2ff3ff" stroke-width="32" stroke-linecap="round"/>
+  </g>
+
+  <!-- transcribed text lines -->
+  <g filter="url(#orGlow)">
+    <rect x="330" y="772" width="364" height="30" rx="15" fill="url(#lineA)"/>
+  </g>
+  <rect x="330" y="828" width="300" height="28" rx="14" fill="#2ff3ff" fill-opacity="0.85"/>
+  <rect x="330" y="882" width="200" height="28" rx="14" fill="#2ff3ff" fill-opacity="0.55"/>
+</svg>
+</body></html>

@@ -1,0 +1,23 @@
+# Python virtual environment (recreate with: python3 -m venv .venv)
+.venv/
+__pycache__/
+*.pyc
+
+# Whisper model weights live in ~/.cache/whisper (downloaded on first run)
+*.pt
+
+# Personal recordings & transcripts — never commit these
+transcripts/
+*.m4a
+*.wav
+*.mp3
+*.webm
+
+# Generated macOS app bundle (rebuild with ./build-app.sh)
+Whisper Local.app/
+
+# Icon build intermediates (rebuild with ./build-app.sh)
+icon/icon.iconset/
+
+# macOS cruft
+.DS_Store

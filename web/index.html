@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Whisper Local — offline voice transcription</title>
+<link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+<main class="wrap">
+
+  <!-- Brand mark: icon over text -->
+  <header class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0" />
+        <line x1="12" y1="18" x2="12" y2="22" />
+        <line x1="8" y1="22" x2="16" y2="22" />
+      </svg>
+    </span>
+    <h1 class="brand-name">Whisper<span class="brand-dot">.</span>Local</h1>
+  </header>
+
+  <section class="card">
+
+    <!-- Controls: record / send / language / timer -->
+    <div class="controls">
+      <button id="recordBtn" class="btn btn-record" aria-label="Record">
+        <span class="dot" aria-hidden="true"></span>
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0" />
+          <line x1="12" y1="18" x2="12" y2="22" />
+          <line x1="8" y1="22" x2="16" y2="22" />
+        </svg>
+        <span id="recordLabel">Record</span>
+      </button>
+
+      <button id="sendBtn" class="btn btn-send" disabled aria-label="Send for transcription">
+        <span>Send</span>
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="4" y1="12" x2="19" y2="12" />
+          <polyline points="13 6 19 12 13 18" />
+        </svg>
+      </button>
+
+      <select id="language" aria-label="Transcription language">
+        <option value="auto">Auto-detect</option>
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+      </select>
+
+      <span class="timer" id="timer" aria-live="off"></span>
+    </div>
+
+    <!-- Microphone visualizer (the "your mic is working" indicator) -->
+    <div class="viz" id="viz"><canvas id="vizCanvas"></canvas></div>
+
+    <!-- Live status -->
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+
+    <!-- Result -->
+    <div class="result">
+      <textarea id="output" placeholder="Your transcribed text will appear here…" spellcheck="false"></textarea>
+      <div class="result-bar">
+        <span class="meta" id="meta"></span>
+        <button id="copyBtn" class="btn btn-copy" disabled aria-label="Copy text">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+          </svg>
+          <span id="copyLabel">Copy</span>
+        </button>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Footer: the one piece of prose that matters -->
+  <footer class="footer">
+    <span class="footer-badge">
+      <span class="footer-pulse" aria-hidden="true"></span>
+      Local transcription service
+    </span>
+    <span class="footer-sub">100% offline · nothing leaves this machine</span>
+  </footer>
+
+</main>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

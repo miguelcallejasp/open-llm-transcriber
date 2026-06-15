@@ -1,0 +1,22 @@
+# Whisper Local — Python dependencies
+#
+# The app intentionally has a single direct dependency. openai-whisper pulls in
+# everything it needs (torch, numpy, tiktoken, tqdm, more-itertools) as
+# transitive dependencies, which pip resolves automatically.
+#
+# Install with:   pip install -r requirements.txt
+# Python:         3.9 – 3.12  (see .python-version)
+# System:         ffmpeg must also be installed (brew install ffmpeg)
+
+openai-whisper==20250625
+
+# --- Notes on transitive dependencies ---------------------------------------
+# These are installed automatically by openai-whisper; listed here only for
+# visibility. Uncomment and pin a specific version if you hit a compatibility
+# issue on your platform (Apple Silicon vs Intel, CUDA vs CPU, etc.).
+#
+# torch>=2.0
+# numpy>=1.24
+# tiktoken
+# tqdm
+# more-itertools
