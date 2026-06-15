@@ -14,7 +14,7 @@ transcripts/
 *.webm
 
 # Generated macOS app bundle (rebuild with ./build-app.sh)
-Whisper Local.app/
+Open LLM Transcriber.app/
 
 # Icon build intermediates (rebuild with ./build-app.sh)
 icon/icon.iconset/

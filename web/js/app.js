@@ -1,4 +1,4 @@
-// Whisper Local — front-end behaviour.
+// Open LLM Transcriber — front-end behaviour.
 // Recording, the mic visualizer, transcription and copy. The DOM contract
 // (element IDs + state classes) matches what styles.css and server.py expect.
 

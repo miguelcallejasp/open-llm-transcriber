@@ -1,4 +1,4 @@
-# Whisper Local — Python dependencies
+# Open LLM Transcriber — Python dependencies
 #
 # The app intentionally has a single direct dependency. openai-whisper pulls in
 # everything it needs (torch, numpy, tiktoken, tqdm, more-itertools) as

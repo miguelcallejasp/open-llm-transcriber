@@ -1,6 +1,6 @@
 # Architecture
 
-Whisper Local is deliberately small. It is two moving parts — a static
+Open LLM Transcriber is deliberately small. It is two moving parts — a static
 browser front-end and a tiny Python server — wired together over `localhost`.
 This document explains how they fit together and why the project is built the
 way it is.
