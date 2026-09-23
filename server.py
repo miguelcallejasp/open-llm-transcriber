@@ -10,9 +10,12 @@ timestamped transcript, and returns the text as JSON.
 Everything runs on your own machine — audio is never uploaded anywhere.
 
 Configuration (environment variables, all optional):
-    WHISPER_HOST   Interface to bind to        (default: 127.0.0.1)
-    WHISPER_PORT   Port to listen on           (default: 8765)
-    WHISPER_MODEL  Whisper model to load       (default: turbo)
+    WHISPER_HOST   Interface to bind to                     (default: 127.0.0.1)
+    WHISPER_PORT   Port to listen on                        (default: 8765)
+    WHISPER_MODEL  Whisper model to load                    (default: turbo)
+    WHISPER_HALLUCINATION_SILENCE_THRESHOLD
+                   Seconds of silence used to reject likely
+                   hallucinations                              (default: 2.0)
 
 Run:
     ./start.sh                 (recommended on macOS)
@@ -38,6 +41,9 @@ import whisper
 HOST = os.environ.get("WHISPER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WHISPER_PORT", "8765"))
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "turbo")
+HALLUCINATION_SILENCE_THRESHOLD = float(
+    os.environ.get("WHISPER_HALLUCINATION_SILENCE_THRESHOLD", "2.0")
+)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
@@ -104,6 +110,17 @@ def _load_model() -> None:
     log.info("Model ready. Open http://%s:%s in your browser.", HOST, PORT)
 
 
+def _transcribe_options(language: str) -> dict[str, object]:
+    options: dict[str, object] = {
+        "fp16": False,
+        "word_timestamps": True,
+        "hallucination_silence_threshold": HALLUCINATION_SILENCE_THRESHOLD,
+    }
+    if language and language != "auto":
+        options["language"] = language
+    return options
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     """Serves the static front-end and handles transcription requests."""
 
@@ -159,10 +176,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             audio_path = tmp.name
 
         try:
-            kwargs = {"fp16": False}
-            # The UI sends ISO codes ("en", "es") or "auto" for detection.
-            if language and language != "auto":
-                kwargs["language"] = language
+            kwargs = _transcribe_options(language)
             log.info("Transcribing (%s)...", language)
             with TRANSCRIBE_LOCK:
                 result = MODEL.transcribe(audio_path, **kwargs)

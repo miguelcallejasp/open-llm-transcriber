@@ -66,8 +66,8 @@ A subclass of `http.server.SimpleHTTPRequestHandler` served by a
    (`auto`, `en`, `es`, …).
 2. Server validates `Content-Length` (rejects empty / oversized requests).
 3. Bytes are written to a temporary `.webm` file.
-4. `MODEL.transcribe(path, fp16=False[, language=code])` runs. Whisper invokes
-   **ffmpeg** internally to decode the audio.
+4. `MODEL.transcribe(...)` runs with word timestamps and silence-hallucination
+   filtering enabled. Whisper invokes **ffmpeg** internally to decode the audio.
 5. The result text is trimmed and written to
    `transcripts/<YYYY-MM-DD_HH-MM-SS>.txt`.
 6. Server responds `{ "text", "language", "saved" }`; on error it responds with
@@ -80,6 +80,7 @@ A subclass of `http.server.SimpleHTTPRequestHandler` served by a
 | Host        | `WHISPER_HOST` env var                    | `127.0.0.1` |
 | Port        | `WHISPER_PORT` env var                    | `8765`      |
 | Model       | `WHISPER_MODEL` env var                   | `turbo`     |
+| Hallucination silence | `WHISPER_HALLUCINATION_SILENCE_THRESHOLD` env var | `2.0` seconds |
 | Languages   | `<select id="language">` in `index.html`  | auto/en/es  |
 
 Whisper models (swap via `WHISPER_MODEL`):

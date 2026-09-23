@@ -119,15 +119,20 @@ Stop it with `Ctrl+C`.
 
 All optional, via environment variables:
 
-| Variable        | Default     | Purpose                          |
-|-----------------|-------------|----------------------------------|
-| `WHISPER_HOST`  | `127.0.0.1` | Interface to bind to             |
-| `WHISPER_PORT`  | `8765`      | Port to listen on                |
-| `WHISPER_MODEL` | `turbo`     | Whisper model (see table below)  |
+| Variable                                   | Default     | Purpose                                      |
+|--------------------------------------------|-------------|----------------------------------------------|
+| `WHISPER_HOST`                             | `127.0.0.1` | Interface to bind to                         |
+| `WHISPER_PORT`                             | `8765`      | Port to listen on                            |
+| `WHISPER_MODEL`                            | `turbo`     | Whisper model (see table below)              |
+| `WHISPER_HALLUCINATION_SILENCE_THRESHOLD`  | `2.0`       | Silence seconds used to reject hallucinations |
 
 ```bash
 WHISPER_MODEL=small WHISPER_PORT=9000 .venv/bin/python server.py
 ```
+
+Whisper uses word timestamps to discard improbable text after silent periods.
+Lower the hallucination threshold if trailing text persists; raise it if valid
+speech after a pause is omitted.
 
 Available models — bigger is more accurate but slower and larger:
 
