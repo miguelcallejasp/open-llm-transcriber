@@ -99,6 +99,44 @@ immediately and loads the model in a background thread, so clients can tell
    nothing was transcribed); on error it responds with a JSON `{ "error" }` and
    an appropriate status code.
 
+## Streaming dictation — `POST /stream/chunk`
+
+Pastes text progressively while the user is still dictating, instead of after
+the whole recording. This is the default mode of the hotkey; the one-shot
+`/transcribe` path remains for the web app and for `config.streaming = false`.
+(The pre-streaming version is tagged `v1.1-dictation`.)
+
+```
+ffmpeg -f segment (2 s WAV files)      Hammerspoon poll (0.5 s)
+  chunk-0000.wav  ─────────────────►  POST /stream/chunk  X-Session: <id>
+  chunk-0001.wav  ─────────────────►  POST /stream/chunk        │
+  …                                                           ▼
+                                      per-session float32 buffer
+                                        └─ pause found? ──► Whisper(piece) ──► {text} ──► ⌘V
+  (⌃⌥D again)   ─────────────────►  POST /stream/chunk  X-Final: 1  ──► flush rest, save transcript
+```
+
+- **Client (`dictation.lua`, `config.streaming = true`)**: ffmpeg writes
+  consecutive WAV segments into a per-recording temp dir. A timer posts every
+  *finished* segment (all but the newest file) in order, one request in flight
+  at a time, so pieces are pasted in the order they were spoken. When ffmpeg
+  exits, the remaining files are posted and an empty `X-Final: 1` request
+  flushes the server buffer. The whole dictation is left on the clipboard at
+  the end, like classic mode.
+- **Server**: `StreamSession` holds the decoded audio and the text committed so
+  far. On every chunk, `_find_split` looks for the *last* pause (≥ 0.3 s of
+  windows below the silence floor) that starts after 1.5 s of audio and cuts
+  there — in the middle of the pause, so no word is clipped. If no pause shows
+  up for 12 s it cuts at the quietest point of the last 3 s. The cut piece goes
+  through the same silence gate and hallucination filter as `/transcribe`, with
+  the previously committed text passed as `initial_prompt` for continuity.
+- **Cost**: Whisper `turbo` on this machine needs ~3 s per piece regardless of
+  piece length (2–5 s of audio), so the server roughly keeps up with real time;
+  only the final piece is paid for after the user stops.
+- **Known limits**: pauses are detected by loudness only (no VAD model), so a
+  noisy room can hide them and force 12 s cuts; sessions that never get a
+  final request are dropped after 10 minutes.
+
 ## System-wide dictation (macOS)
 
 `install-dictation.sh` adds two pieces around the unchanged server:
