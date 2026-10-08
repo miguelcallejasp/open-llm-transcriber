@@ -99,13 +99,12 @@ immediately and loads the model in a background thread, so clients can tell
    nothing was transcribed); on error it responds with a JSON `{ "error" }` and
    an appropriate status code.
 
-## Experiment: streaming dictation — `POST /stream/chunk`
+## Streaming dictation — `POST /stream/chunk`
 
-*Lives on the `experiment/streaming-chunks` branch; `main` (tag `v1.1-dictation`)
-does not have it.*
-
-Goal: paste text progressively while the user is still dictating, instead of
-after the whole recording, and measure whether the end-to-end wait is shorter.
+Pastes text progressively while the user is still dictating, instead of after
+the whole recording. This is the default mode of the hotkey; the one-shot
+`/transcribe` path remains for the web app and for `config.streaming = false`.
+(The pre-streaming version is tagged `v1.1-dictation`.)
 
 ```
 ffmpeg -f segment (2 s WAV files)      Hammerspoon poll (0.5 s)

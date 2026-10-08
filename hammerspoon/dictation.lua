@@ -27,7 +27,7 @@ M.config = {
   minBytes      = 4000,   -- ~0.1 s of 16 kHz mono PCM; anything smaller is "nothing recorded"
   healthEvery   = 5,      -- seconds between /health polls
   curl          = "/usr/bin/curl",
-  -- EXPERIMENT: stream ~2 s chunks to the server while recording and paste
+  -- Stream ~2 s chunks to the server while recording and paste
   -- each finished phrase as soon as it is transcribed, instead of waiting
   -- for the whole recording. false = classic one-shot mode.
   streaming     = true,
@@ -222,7 +222,7 @@ local function statusLine()
     ready        = "Ready — press " .. k .. " to dictate",
     recording    = "Recording… press " .. k .. " to stop",
     transcribing = "Transcribing…",
-  })[M.state] .. (M.config.streaming and "   · streaming experiment" or "")
+  })[M.state]
 end
 
 local function uid()
