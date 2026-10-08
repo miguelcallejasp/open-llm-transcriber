@@ -82,6 +82,43 @@ recording after the first is fast. For a deeper dive see
 
 ---
 
+## ⚗️ Experiment: streaming dictation (this branch)
+
+> **Branch `experiment/streaming-chunks` only.** The stable version is tagged
+> `v1.1-dictation` on `main`. To go back: `git checkout main`, then restart the
+> server from the 🎙 menu (**Restart server**) and pick **Reload Hammerspoon
+> config**.
+
+Instead of waiting for the whole recording to finish before transcribing, the
+hotkey now records in ~2 s chunks and sends them to the server *while you are
+still talking*. The server buffers them and, every time it detects a pause in
+your speech, transcribes everything up to that pause and returns it, so the
+text is pasted sentence by sentence as you go. When you press ⌃⌥D to stop,
+only the last unfinished phrase remains to be transcribed.
+
+What to look for while testing:
+
+- **Does text appear while you are still speaking?** It should, after each
+  natural pause (about 0.3 s of silence) once at least 1.5 s has been spoken.
+- **Is the wait after stopping shorter?** For a long dictation it should drop
+  from "proportional to the recording" to roughly one Whisper call (~3 s on
+  this machine), because almost everything was already transcribed.
+- **Quality at the seams.** Each piece is transcribed with the previous text as
+  context, but a cut in the wrong place can still split a word. Pieces are
+  only ever cut inside a pause, never mid-speech, unless no pause has been
+  found for 12 s.
+
+Both modes write timings to `logs/dictation.log` (per-chunk round trips and
+"stop → final text") and `logs/server.log` (per-chunk Whisper time), so the
+two approaches can be compared on the same machine.
+
+Switches: `streaming = true/false` and `chunkSeconds` in `hammerspoon/dictation.lua`;
+`WHISPER_STREAM_MIN_SECONDS`, `WHISPER_STREAM_MAX_SECONDS` and
+`WHISPER_STREAM_PAUSE_SECONDS` on the server (defaults 1.5 / 12 / 0.3). The
+web app is unaffected: it still uses the one-shot `POST /transcribe`.
+
+---
+
 ## System-wide dictation (⌃⌥D)
 
 `install-dictation.sh` turns the transcriber into a macOS dictation tool that

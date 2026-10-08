@@ -29,6 +29,19 @@ Configuration (environment variables, all optional):
                    invent words. Lower it (e.g. -40) if quiet
                    speech is being dropped                      (default: -32)
 
+    WHISPER_STREAM_MIN_SECONDS / WHISPER_STREAM_MAX_SECONDS /
+    WHISPER_STREAM_PAUSE_SECONDS
+                   Tuning for the experimental streaming endpoint
+                   (see "Streaming" below)              (default: 1.5 / 12 / 0.3)
+
+EXPERIMENT — streaming (``POST /stream/chunk``):
+    The dictation hotkey can send audio *while* recording, in ~2 s WAV
+    chunks tagged with an ``X-Session`` id. The server appends them to a
+    per-session buffer and, whenever it sees a pause in speech, transcribes
+    everything up to that pause and returns it immediately, so text can be
+    pasted piece by piece instead of after the whole recording. ``X-Final: 1``
+    flushes what is left and closes the session.
+
 Run:
     ./start.sh                 (recommended on macOS)
     .venv/bin/python server.py
@@ -43,10 +56,11 @@ import logging
 import os
 import shutil
 import socketserver
+import re
 import sys
 import tempfile
-import re
 import threading
+import time
 
 import numpy as np
 import whisper
@@ -59,6 +73,16 @@ HALLUCINATION_SILENCE_THRESHOLD = float(
     os.environ.get("WHISPER_HALLUCINATION_SILENCE_THRESHOLD", "2.0")
 )
 SILENCE_DBFS = float(os.environ.get("WHISPER_SILENCE_DBFS", "-32"))
+
+# --- Streaming experiment knobs ---
+SAMPLE_RATE = 16000
+# Never commit a piece shorter than this (gives Whisper enough context).
+STREAM_MIN_SECONDS = float(os.environ.get("WHISPER_STREAM_MIN_SECONDS", "1.5"))
+# If no pause is found for this long, cut at the quietest recent point anyway.
+STREAM_MAX_SECONDS = float(os.environ.get("WHISPER_STREAM_MAX_SECONDS", "12"))
+# How long speech must drop out for it to count as a pause worth cutting at.
+STREAM_PAUSE_SECONDS = float(os.environ.get("WHISPER_STREAM_PAUSE_SECONDS", "0.3"))
+STREAM_SESSION_TTL = 600  # seconds of inactivity before a session is dropped
 
 # Whisper (especially `turbo`) confidently invents a handful of stock phrases
 # when fed silence or room noise — subtitle credits, "Thank you." and so on.
@@ -190,6 +214,106 @@ def _looks_hallucinated(text: str) -> bool:
     return bool(HALLUCINATION_PHRASES.match(text.strip()))
 
 
+# --- Streaming experiment ----------------------------------------------------
+class StreamSession:
+    """Audio buffered for one in-progress dictation (keyed by X-Session)."""
+
+    def __init__(self, language: str) -> None:
+        self.language = language
+        self.buffer = np.zeros(0, dtype=np.float32)
+        self.committed: list[str] = []
+        self.touched = time.monotonic()
+        self.lock = threading.Lock()
+
+
+SESSIONS: dict[str, StreamSession] = {}
+SESSIONS_LOCK = threading.Lock()
+
+
+def _session(sid: str, language: str) -> StreamSession:
+    now = time.monotonic()
+    with SESSIONS_LOCK:
+        for key in [k for k, v in SESSIONS.items() if now - v.touched > STREAM_SESSION_TTL]:
+            log.info("Stream %s expired", key)
+            del SESSIONS[key]
+        sess = SESSIONS.get(sid)
+        if sess is None:
+            sess = SESSIONS[sid] = StreamSession(language)
+        sess.touched = now
+        return sess
+
+
+def _window_db(audio: "np.ndarray", win: int = SAMPLE_RATE // 10) -> "np.ndarray":
+    """Per-100 ms-window RMS in dBFS (empty array if shorter than one window)."""
+    n = audio.size // win
+    if n == 0:
+        return np.zeros(0)
+    frames = audio[: n * win].reshape(n, win)
+    rms = np.sqrt(np.mean(np.square(frames, dtype=np.float64), axis=1))
+    return 20.0 * np.log10(np.maximum(rms, 1e-6))
+
+
+def _find_split(audio: "np.ndarray") -> "int | None":
+    """Pick a sample index to cut the buffer at, or None to keep waiting.
+
+    Preferred: the middle of the *last* pause (>= STREAM_PAUSE_SECONDS of quiet
+    windows) that begins after STREAM_MIN_SECONDS of audio — so we commit as
+    much finished speech as possible and keep only the in-progress tail.
+    Fallback: once the buffer exceeds STREAM_MAX_SECONDS, cut at the quietest
+    window of the last 3 s so a long run-on sentence still flows out.
+    """
+    win = SAMPLE_RATE // 10
+    db = _window_db(audio, win)
+    n = db.size
+    min_win = int(STREAM_MIN_SECONDS * 10)
+    if n <= min_win:
+        return None
+
+    # "Quiet" is relative to how loud the speech in this buffer is, but never
+    # louder than the global silence floor.
+    loud = float(np.percentile(db, 90))
+    floor = min(SILENCE_DBFS, loud - 15.0)
+    quiet = db < floor
+    need = max(1, int(round(STREAM_PAUSE_SECONDS * 10)))
+
+    best = None
+    start = None
+    for i in range(n + 1):
+        is_quiet = i < n and quiet[i]
+        if is_quiet and start is None:
+            start = i
+        elif not is_quiet and start is not None:
+            if i - start >= need and start >= min_win:
+                best = (start, i)
+            start = None
+    if best is not None:
+        a, b = best
+        return ((a + b) // 2) * win
+
+    if n >= int(STREAM_MAX_SECONDS * 10):
+        lo = max(min_win, n - 30)
+        idx = lo + int(np.argmin(db[lo:]))
+        return idx * win
+    return None
+
+
+def _transcribe_piece(sess: StreamSession, piece: "np.ndarray") -> str:
+    """Run Whisper on one committed piece, using earlier text as context."""
+    if _is_silent(piece):
+        return ""
+    options = _transcribe_options(sess.language)
+    context = " ".join(sess.committed)[-200:]
+    if context:
+        options["initial_prompt"] = context
+    with TRANSCRIBE_LOCK:
+        result = MODEL.transcribe(piece, **options)
+    text = result["text"].strip()
+    if not text or _looks_hallucinated(text):
+        return ""
+    sess.committed.append(text)
+    return text
+
+
 def _audio_suffix(content_type: str) -> str:
     """Pick a temp-file suffix from a Content-Type header (see AUDIO_SUFFIXES)."""
     mime = content_type.split(";", 1)[0].strip().lower()
@@ -232,40 +356,129 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
-        if self.path != "/transcribe":
+        if self.path == "/transcribe":
+            self._handle_transcribe()
+        elif self.path == "/stream/chunk":
+            self._handle_stream_chunk()
+        else:
             self._send_json(404, {"error": "Not found"})
-            return
 
-        if not MODEL_READY.is_set():
-            self._send_json(503, {"error": "The Whisper model is still loading — try again shortly."})
-            return
-
-        # Only accept requests that originate from this machine (see ALLOWED_HOSTS).
+    def _local_only(self) -> bool:
+        """True if the request comes from this machine (see ALLOWED_HOSTS)."""
         host = _host_only(self.headers.get("Host", ""))
         if host and host not in ALLOWED_HOSTS:
-            self._send_json(403, {"error": "Forbidden"})
-            return
+            return False
         origin = self.headers.get("Origin")
         if origin and _host_only(origin) not in ALLOWED_HOSTS:
-            self._send_json(403, {"error": "Forbidden"})
-            return
+            return False
+        return True
 
-        # Validate the upload size before reading the body.
+    def _read_body(self, allow_empty: bool = False) -> "bytes | None":
+        """Validate Content-Length and read the body; sends the error itself."""
         try:
             length = int(self.headers.get("Content-Length", 0))
         except (TypeError, ValueError):
             self._send_json(400, {"error": "Invalid Content-Length header"})
-            return
+            return None
         if length <= 0:
+            if allow_empty:
+                return b""
             self._send_json(400, {"error": "Empty request body"})
-            return
+            return None
         if length > MAX_UPLOAD_BYTES:
             self._send_json(413, {"error": "Audio upload too large"})
+            return None
+        return self.rfile.read(length)
+
+    def _handle_stream_chunk(self) -> None:
+        """EXPERIMENT: append a chunk to a session; return any newly final text."""
+        if not self._local_only():
+            self._send_json(403, {"error": "Forbidden"})
+            return
+        if not MODEL_READY.is_set():
+            self._send_json(503, {"error": "The Whisper model is still loading — try again shortly."})
+            return
+        sid = self.headers.get("X-Session", "").strip()
+        if not sid or len(sid) > 64:
+            self._send_json(400, {"error": "Missing or invalid X-Session header"})
+            return
+        final = self.headers.get("X-Final", "0").strip() == "1"
+        language = self.headers.get("X-Language", "auto")
+        body = self._read_body(allow_empty=final)
+        if body is None:
+            return
+
+        samples = np.zeros(0, dtype=np.float32)
+        if body:
+            suffix = _audio_suffix(self.headers.get("Content-Type", ""))
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(body)
+                audio_path = tmp.name
+            try:
+                samples = whisper.load_audio(audio_path)
+            except Exception:  # noqa: BLE001
+                log.exception("Could not decode stream chunk")
+                self._send_json(400, {"error": "Could not decode audio chunk"})
+                return
+            finally:
+                os.unlink(audio_path)
+
+        sess = _session(sid, language)
+        t0 = time.monotonic()
+        try:
+            with sess.lock:
+                sess.buffer = np.concatenate([sess.buffer, samples])
+                pieces: list[np.ndarray] = []
+                if final:
+                    pieces.append(sess.buffer)
+                    sess.buffer = np.zeros(0, dtype=np.float32)
+                else:
+                    cut = _find_split(sess.buffer)
+                    if cut:
+                        pieces.append(sess.buffer[:cut])
+                        sess.buffer = sess.buffer[cut:]
+                texts = [t for t in (_transcribe_piece(sess, p) for p in pieces) if t]
+                text = " ".join(texts)
+                buffered = sess.buffer.size / SAMPLE_RATE
+                payload: dict[str, object] = {
+                    "text": text, "final": final, "buffered_seconds": round(buffered, 2),
+                }
+                if final:
+                    full = " ".join(sess.committed)
+                    payload["full"] = full
+                    payload["saved"] = None
+                    if full:
+                        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        out_path = os.path.join(TRANSCRIPTS_DIR, f"{stamp}.txt")
+                        with open(out_path, "w", encoding="utf-8") as f:
+                            f.write(full + "\n")
+                        payload["saved"] = out_path
+                    with SESSIONS_LOCK:
+                        SESSIONS.pop(sid, None)
+            log.info(
+                "Stream %s: +%.1fs%s -> %d piece(s) %r, %.1fs buffered, took %.2fs",
+                sid[-6:], samples.size / SAMPLE_RATE, " FINAL" if final else "",
+                len(pieces), text[:60], buffered, time.monotonic() - t0,
+            )
+            self._send_json(200, payload)
+        except Exception:  # noqa: BLE001
+            log.exception("Stream chunk failed")
+            self._send_json(500, {"error": "Transcription failed — see server logs."})
+
+    def _handle_transcribe(self) -> None:
+
+        if not MODEL_READY.is_set():
+            self._send_json(503, {"error": "The Whisper model is still loading — try again shortly."})
+            return
+        if not self._local_only():
+            self._send_json(403, {"error": "Forbidden"})
+            return
+        audio = self._read_body()
+        if audio is None:
             return
 
         language = self.headers.get("X-Language", "auto")
         suffix = _audio_suffix(self.headers.get("Content-Type", ""))
-        audio = self.rfile.read(length)
 
         # Persist the raw recording to a temp file for ffmpeg/whisper to read.
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:

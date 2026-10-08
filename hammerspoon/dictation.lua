@@ -27,6 +27,12 @@ M.config = {
   minBytes      = 4000,   -- ~0.1 s of 16 kHz mono PCM; anything smaller is "nothing recorded"
   healthEvery   = 5,      -- seconds between /health polls
   curl          = "/usr/bin/curl",
+  -- EXPERIMENT: stream ~2 s chunks to the server while recording and paste
+  -- each finished phrase as soon as it is transcribed, instead of waiting
+  -- for the whole recording. false = classic one-shot mode.
+  streaming     = true,
+  chunkSeconds  = 2,
+  pollSeconds   = 0.5,
   -- System sounds (see /System/Library/Sounds). The start chime must be short:
   -- the mic opens only after `startSoundDelay`, so the chime isn't recorded.
   startSound      = "Pop",
@@ -71,7 +77,24 @@ M.tmpFile = nil
 M.recordingStarted = nil
 M.timers = {}
 
-local function log(fmt, ...) print(string.format("[dictation] " .. fmt, ...)) end
+local LOG_FILE = ROOT .. "/logs/dictation.log"
+local function log(fmt, ...)
+  local line = string.format("[dictation] " .. fmt, ...)
+  print(line)
+  local f = io.open(LOG_FILE, "a")
+  if f then
+    f:write(os.date("%H:%M:%S "), line, "\n")
+    f:close()
+  end
+end
+
+-- Run fn, logging a traceback instead of dying silently inside a callback.
+local function guarded(name, fn)
+  return function(...)
+    local ok, err = xpcall(fn, debug.traceback, ...)
+    if not ok then log("ERROR in %s: %s", name, tostring(err)) end
+  end
+end
 
 local function playSound(name)
   if not name or name == "" then return end
@@ -199,7 +222,7 @@ local function statusLine()
     ready        = "Ready — press " .. k .. " to dictate",
     recording    = "Recording… press " .. k .. " to stop",
     transcribing = "Transcribing…",
-  })[M.state]
+  })[M.state] .. (M.config.streaming and "   · streaming experiment" or "")
 end
 
 local function uid()
@@ -372,6 +395,193 @@ local function transcribe(path)
   end
 end
 
+-- --- Streaming experiment ---------------------------------------------------
+-- ffmpeg writes chunk-0000.wav, chunk-0001.wav, … into a per-recording temp
+-- dir. A poll timer posts every *finished* chunk (all but the newest file,
+-- which ffmpeg is still writing) to /stream/chunk, strictly in order, one
+-- request in flight at a time. Text that comes back is pasted immediately.
+-- When ffmpeg exits, the remaining files are posted and a final empty request
+-- flushes whatever the server still has buffered.
+M.stream = nil  -- { id, dir, sent = {}, queue = {}, inflight, ffmpegDone, stoppedAt, firstPasteAt }
+
+local function pasteText(text)
+  hs.pasteboard.setContents(text .. " ")
+  hs.timer.doAfter(0.05, function() hs.eventtap.keyStroke({ "cmd" }, "v", 0) end)
+end
+
+local function streamCleanup()
+  local st = M.stream
+  if not st then return end
+  if M.timers.poll then M.timers.poll:stop(); M.timers.poll = nil end
+  if st.dir then
+    for f in hs.fs.dir(st.dir) do
+      if f ~= "." and f ~= ".." then os.remove(st.dir .. f) end
+    end
+    hs.fs.rmdir(st.dir)
+  end
+  M.stream = nil
+end
+
+local function streamFinish(data)
+  local st = M.stream
+  local full = (data and data.full or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if st and st.stoppedAt then
+    log("stream: stop -> final text %.2fs (first paste %s after start)",
+      hs.timer.secondsSinceEpoch() - st.stoppedAt,
+      st.firstPasteAt and string.format("%.1fs", st.firstPasteAt - M.recordingStarted) or "never")
+  end
+  streamCleanup()
+  setState("ready")
+  if full == "" then
+    toast("Nothing heard", 1.2)
+    return
+  end
+  -- Leave the whole dictation on the clipboard, like classic mode does.
+  hs.pasteboard.setContents(full .. " ")
+  if not M.autoPaste then
+    hs.timer.doAfter(0.05, function() hs.eventtap.keyStroke({ "cmd" }, "v", 0) end)
+  end
+  local snippet = full
+  if #snippet > 80 then snippet = snippet:sub(1, 77) .. "…" end
+  toast("Done: " .. snippet, 1.8)
+end
+
+local streamProcessQueue  -- forward declaration
+
+local function streamSend(item)
+  local st = M.stream
+  local args = {
+    "-sS", "--max-time", "600",
+    "-H", "Content-Type: audio/wav",
+    "-H", "X-Language: " .. M.language,
+    "-H", "X-Session: " .. st.id,
+    "-H", "X-Final: " .. (item.final and "1" or "0"),
+  }
+  if item.path then
+    args[#args + 1] = "--data-binary"; args[#args + 1] = "@" .. item.path
+  else
+    args[#args + 1] = "-X"; args[#args + 1] = "POST"
+    args[#args + 1] = "-H"; args[#args + 1] = "Content-Length: 0"
+  end
+  args[#args + 1] = "-w"; args[#args + 1] = "\n%{http_code}"
+  args[#args + 1] = M.config.serverURL .. "/stream/chunk"
+
+  local t0 = hs.timer.secondsSinceEpoch()
+  local t = hs.task.new(M.config.curl, guarded("stream curl callback", function(code, out, err)
+    if not M.stream or M.stream ~= st then return end  -- cancelled meanwhile
+    st.inflight = false
+    local body, httpCode = (out or ""):match("^(.*)\n(%d+)%s*$")
+    local ok, data = pcall(hs.json.decode, body or "")
+    if code ~= 0 or httpCode ~= "200" or not ok or type(data) ~= "table" then
+      local msg = (ok and type(data) == "table" and data.error) or err or ("HTTP " .. tostring(httpCode))
+      log("stream: chunk failed: %s", tostring(msg))
+      if item.final then
+        notify("Dictation failed", tostring(msg))
+        streamCleanup()
+        setState("ready")
+        pollHealth()
+      else
+        streamProcessQueue()
+      end
+      return
+    end
+    local text = (data.text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    log("stream: %s -> %q (%.2fs, %.1fs buffered)", item.path and item.path:match("[^/]+$") or "final",
+      text, hs.timer.secondsSinceEpoch() - t0, tonumber(data.buffered_seconds) or -1)
+    if text ~= "" and M.autoPaste then
+      if not st.firstPasteAt then st.firstPasteAt = hs.timer.secondsSinceEpoch() end
+      pasteText(text)
+    end
+    if item.final then
+      streamFinish(data)
+    else
+      streamProcessQueue()
+    end
+  end), args)
+  st.inflight = true
+  if not t:start() then
+    st.inflight = false
+    log("stream: could not start curl")
+  end
+end
+
+streamProcessQueue = function()
+  local st = M.stream
+  if not st or st.inflight or #st.queue == 0 then return end
+  streamSend(table.remove(st.queue, 1))
+end
+
+local function streamScan()
+  local st = M.stream
+  if not st then return end
+  local names = {}
+  for f in hs.fs.dir(st.dir) do
+    if f:match("^chunk%-%d+%.wav$") then names[#names + 1] = f end
+  end
+  table.sort(names)
+  -- The newest file is still being written unless ffmpeg has exited.
+  local complete = st.ffmpegDone and #names or (#names - 1)
+  for i = 1, complete do
+    local f = names[i]
+    if not st.sent[f] then
+      st.sent[f] = true
+      st.queue[#st.queue + 1] = { path = st.dir .. f, final = false }
+    end
+  end
+  if st.ffmpegDone and not st.finalQueued then
+    st.finalQueued = true
+    st.queue[#st.queue + 1] = { path = nil, final = true }
+    if M.timers.poll then M.timers.poll:stop(); M.timers.poll = nil end
+  end
+  streamProcessQueue()
+end
+
+local function streamStart()
+  local mic = micDeviceName()
+  local id = string.format("%d-%04d", os.time(), math.random(0, 9999))
+  local dir = string.format("%solt-stream-%s/", hs.fs.temporaryDirectory(), id)
+  hs.fs.mkdir(dir)
+  M.stream = { id = id, dir = dir, sent = {}, queue = {}, inflight = false, ffmpegDone = false }
+  local args = {
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+    "-f", "avfoundation", "-i", ":" .. (mic or "0"),
+    "-t", tostring(M.config.maxSeconds),
+    "-ac", "1", "-ar", "16000",
+    "-f", "segment", "-segment_time", tostring(M.config.chunkSeconds),
+    "-reset_timestamps", "1", "-segment_format", "wav",
+    dir .. "chunk-%04d.wav",
+  }
+  M.task = hs.task.new(M.ffmpeg, guarded("stream ffmpeg exit", function(_code, _out, stderr)
+    stopRecordingTimer()
+    M.task = nil
+    local st = M.stream
+    if not st then return end
+    if M.cancelled then
+      M.cancelled = false
+      streamCleanup()
+      setState("ready")
+      toast("Dictation cancelled", 1)
+      return
+    end
+    if stderr and stderr ~= "" then log("ffmpeg: %s", stderr) end
+    st.ffmpegDone = true
+    st.stoppedAt = st.stoppedAt or hs.timer.secondsSinceEpoch()
+    setState("transcribing")
+    playSound(M.config.stopSound)
+    streamScan()
+  end), args)
+  if not M.task:start() then
+    M.task = nil
+    streamCleanup()
+    stopRecordingTimer()
+    setState("ready")
+    notify("Dictation failed", "Could not start ffmpeg.")
+    return
+  end
+  M.timers.poll = hs.timer.doEvery(M.config.pollSeconds, guarded("stream scan", streamScan))
+  log("stream: started session %s (%ss chunks)", id, tostring(M.config.chunkSeconds))
+end
+
 local function onRecordingDone(_exitCode, _stdout, stderr)
   -- ffmpeg exits 255 when interrupted with SIGINT, which is our normal stop
   -- path, so judge success by the file it left behind rather than the code.
@@ -427,6 +637,10 @@ function M.startRecording()
       setState("ready")
       return
     end
+    if M.config.streaming then
+      streamStart()
+      return
+    end
     local mic = micDeviceName()
     M.tmpFile = string.format("%solt-dictation-%d.wav", hs.fs.temporaryDirectory(), os.time())
     local args = {
@@ -436,7 +650,7 @@ function M.startRecording()
       "-ac", "1", "-ar", "16000",
       M.tmpFile,
     }
-    M.task = hs.task.new(M.ffmpeg, onRecordingDone, args)
+    M.task = hs.task.new(M.ffmpeg, guarded("ffmpeg exit", onRecordingDone), args)
     if not M.task:start() then
       M.task = nil
       cleanupTmp()
@@ -447,9 +661,30 @@ function M.startRecording()
   end)
 end
 
+-- ffmpeg normally exits within ~100 ms of SIGINT. If it does not, escalate:
+-- SIGTERM after 2 s, SIGKILL after 4 s. The exit callback then runs as usual
+-- (segment files written so far are already finalized, so nothing is lost).
+local function armStopWatchdog(task)
+  if M.timers.watchdog then M.timers.watchdog:stop() end
+  M.timers.watchdog = hs.timer.doAfter(2, function()
+    if M.task == task and task:isRunning() then
+      log("ffmpeg still running 2s after SIGINT — sending SIGTERM")
+      task:terminate()
+      M.timers.watchdog = hs.timer.doAfter(2, function()
+        if M.task == task and task:isRunning() then
+          log("ffmpeg still running — SIGKILL")
+          hs.execute("kill -9 " .. tostring(task:pid()))
+        end
+      end)
+    end
+  end)
+end
+
 function M.stopRecording()
   if M.task and M.task:isRunning() then
+    if M.stream then M.stream.stoppedAt = hs.timer.secondsSinceEpoch() end
     M.task:interrupt()  -- SIGINT lets ffmpeg finalize the WAV header
+    armStopWatchdog(M.task)
   elseif M.state == "recording" and not M.task then
     -- Stopped during the start chime: nothing was recorded yet.
     M.cancelled = true
