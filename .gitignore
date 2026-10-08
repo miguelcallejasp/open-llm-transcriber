@@ -21,3 +21,6 @@ icon/icon.iconset/
 
 # macOS cruft
 .DS_Store
+
+# Server log written by the launchd agent (install-dictation.sh)
+logs/

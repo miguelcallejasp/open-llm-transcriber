@@ -20,11 +20,11 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 0
 fi
 
-# Otherwise: once the port is actually listening (model finished loading),
+# Otherwise: once the server reports the model is loaded (GET /health),
 # open the browser at the address.
 (
-  for _ in $(seq 1 120); do
-    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  for _ in $(seq 1 240); do
+    if curl -sf "${URL}health" 2>/dev/null | grep -q '"ready": true'; then
       open_browser
       break
     fi
