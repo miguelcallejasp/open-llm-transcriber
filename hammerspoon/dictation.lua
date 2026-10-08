@@ -43,6 +43,7 @@ local function saveSetting(key, value) hs.settings.set("olt." .. key, value) end
 
 M.language  = setting("language", "auto")
 M.autoPaste = setting("autoPaste", true)
+M.showToast = setting("showToast", true)
 
 -- Find ffmpeg: Homebrew (Apple Silicon / Intel), then whatever the login shell knows.
 local function findFfmpeg()
@@ -89,10 +90,73 @@ local function notify(title, text)
   hs.notify.new({ title = title, informativeText = text or "", withdrawAfter = 6 }):send()
 end
 
+-- A small, understated toast at the top edge of the screen (Hammerspoon's
+-- default hs.alert is a huge centered box). Used for quick feedback only;
+-- real errors go through native notifications via notify().
+local TOAST_STYLE = {
+  textSize        = 13,
+  textFont        = ".AppleSystemUIFont",
+  textColor       = { white = 1, alpha = 0.95 },
+  fillColor       = { white = 0.12, alpha = 0.88 },
+  strokeWidth     = 0,
+  strokeColor     = { white = 1, alpha = 0 },
+  radius          = 8,
+  padding         = 10,
+  atScreenEdge    = 1,      -- 1 = top of screen
+  fadeInDuration  = 0.1,
+  fadeOutDuration = 0.3,
+}
+local function toast(text, seconds)
+  if not M.showToast then return end
+  hs.alert.show(text, TOAST_STYLE, hs.screen.mainScreen(), seconds or 1.2)
+end
+
 -- --- Menu bar --------------------------------------------------------------
 M.menubar = hs.menubar.new()
 
 local RED = { red = 0.95, green = 0.25, blue = 0.25 }
+
+-- Draw a minimal microphone glyph (capsule, cradle, stem, base) as a template
+-- image: macOS then renders it in the menu-bar foreground colour, so it looks
+-- like the system's own monochrome icons in both light and dark mode.
+local function micImage(opts)
+  opts = opts or {}
+  local ink = { white = 0, alpha = opts.alpha or 1 }
+  local c = hs.canvas.new({ x = 0, y = 0, w = 18, h = 18 })
+  c[#c + 1] = {
+    type = "rectangle", action = "fill", fillColor = ink,
+    frame = { x = 6.5, y = 1.5, w = 5, h = 9.5 },
+    roundedRectRadii = { xRadius = 2.5, yRadius = 2.5 },
+  }
+  c[#c + 1] = {
+    type = "arc", action = "stroke", strokeColor = ink, strokeWidth = 1.5, arcRadii = false,
+    center = { x = 9, y = 8 }, radius = 5.25, startAngle = 90, endAngle = 270,
+  }
+  c[#c + 1] = {
+    type = "segments", action = "stroke", strokeColor = ink, strokeWidth = 1.5,
+    coordinates = { { x = 9, y = 13.25 }, { x = 9, y = 16.25 } },
+  }
+  c[#c + 1] = {
+    type = "segments", action = "stroke", strokeColor = ink, strokeWidth = 1.5, strokeCapStyle = "round",
+    coordinates = { { x = 5.75, y = 16.25 }, { x = 12.25, y = 16.25 } },
+  }
+  if opts.slash then
+    c[#c + 1] = {
+      type = "segments", action = "stroke", strokeColor = ink, strokeWidth = 1.5, strokeCapStyle = "round",
+      coordinates = { { x = 3.5, y = 15 }, { x = 14.5, y = 3 } },
+    }
+  end
+  local img = c:imageFromCanvas()
+  c:delete()
+  img:template(true)
+  return img
+end
+
+local ICONS = {
+  ready   = micImage(),
+  loading = micImage({ alpha = 0.35 }),
+  offline = micImage({ slash = true }),
+}
 
 local function elapsed()
   if not M.recordingStarted then return "0:00" end
@@ -103,19 +167,25 @@ end
 local function refreshTitle()
   local st = M.state
   if st == "recording" then
+    -- Text only: a red dot and the elapsed time.
+    M.menubar:setIcon(nil)
     M.menubar:setTitle(hs.styledtext.new("● " .. elapsed(), { color = RED }))
     M.menubar:setTooltip("Recording — press " .. M.config.hotkeyLabel .. " to stop")
   elseif st == "transcribing" then
-    M.menubar:setTitle("🎙 ✍️")
+    M.menubar:setIcon(ICONS.ready)
+    M.menubar:setTitle("…")
     M.menubar:setTooltip("Transcribing…")
   elseif st == "ready" then
-    M.menubar:setTitle("🎙")
+    M.menubar:setIcon(ICONS.ready)
+    M.menubar:setTitle(nil)
     M.menubar:setTooltip("Ready — press " .. M.config.hotkeyLabel .. " to dictate")
   elseif st == "loading" then
-    M.menubar:setTitle("🎙 ⏳")
+    M.menubar:setIcon(ICONS.loading)
+    M.menubar:setTitle(nil)
     M.menubar:setTooltip("Whisper model is loading…")
   else
-    M.menubar:setTitle("🎙 off")
+    M.menubar:setIcon(ICONS.offline)
+    M.menubar:setTitle(nil)
     M.menubar:setTooltip("Transcription server is not running")
   end
 end
@@ -193,6 +263,14 @@ local function buildMenu()
       saveSetting("autoPaste", M.autoPaste)
     end,
   }
+  items[#items + 1] = {
+    title = "Show on-screen confirmation",
+    checked = M.showToast,
+    fn = function()
+      M.showToast = not M.showToast
+      saveSetting("showToast", M.showToast)
+    end,
+  }
 
   items[#items + 1] = { title = "-" }
   items[#items + 1] = { title = "Open web app", fn = function() hs.urlevent.openURL(M.config.serverURL .. "/") end }
@@ -255,7 +333,7 @@ local function deliver(text)
   end
   local snippet = text
   if #snippet > 80 then snippet = snippet:sub(1, 77) .. "…" end
-  hs.alert.show((M.autoPaste and "📝 " or "📋 ") .. snippet, 1.8)
+  toast((M.autoPaste and "Pasted: " or "Copied: ") .. snippet, 1.8)
 end
 
 local function transcribe(path)
@@ -283,7 +361,7 @@ local function transcribe(path)
       local text = data.text:gsub("^%s+", ""):gsub("%s+$", "")
       setState("ready")
       if text == "" then
-        hs.alert.show("🤫 Nothing heard", 1.2)
+        toast("Nothing heard", 1.2)
       else
         deliver(text)
       end
@@ -312,13 +390,13 @@ local function onRecordingDone(_exitCode, _stdout, stderr)
     M.cancelled = false
     cleanupTmp()
     setState("ready")
-    hs.alert.show("Dictation cancelled", 1)
+    toast("Dictation cancelled", 1)
     return
   end
   if not attrs or attrs.size < M.config.minBytes then
     cleanupTmp()
     setState("ready")
-    hs.alert.show("🤫 Nothing recorded", 1.2)
+    toast("Nothing recorded", 1.2)
     if stderr and stderr ~= "" then log("ffmpeg: %s", stderr) end
     return
   end
@@ -330,7 +408,7 @@ function M.startRecording()
     if M.state == "offline" then
       notify("Transcription server offline", "Start it from the 🎙 menu, or run ./install-dictation.sh.")
     elseif M.state == "loading" then
-      hs.alert.show("⏳ Whisper is still loading…", 1.2)
+      toast("Whisper is still loading…", 1.2)
     end
     return
   end
@@ -393,7 +471,7 @@ function M.toggle()
   if M.state == "recording" then
     M.stopRecording()
   elseif M.state == "transcribing" then
-    hs.alert.show("✍️ Still transcribing…", 1)
+    toast("Still transcribing…", 1)
   else
     M.startRecording()
   end

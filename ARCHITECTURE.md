@@ -111,10 +111,13 @@ immediately and loads the model in a background thread, so clients can tell
   `~/.hammerspoon/init.lua`. It owns:
   - the **⌃⌥D** hotkey (toggle: start / stop) and **Esc** to cancel while
     recording;
-  - the **menu-bar item**, which polls `GET /health` every 5 s and shows
-    `🎙` ready / `🎙 ⏳` loading / `🎙 off` offline / red `● m:ss` recording /
-    `🎙 ✍️` transcribing, plus a menu (language, auto-paste toggle, open web app,
-    transcripts, server log, restart server via `launchctl kickstart`);
+  - the **menu-bar item**, which polls `GET /health` every 5 s and shows a
+    monochrome mic glyph (drawn with `hs.canvas`, exported as a template image
+    so macOS tints it for light/dark menu bars): full = ready, dimmed =
+    loading, slashed = offline; red `● m:ss` text while recording and `…`
+    while transcribing. Its menu offers language, auto-paste and toast
+    toggles, open web app, transcripts, server log, and restart server via
+    `launchctl kickstart`;
   - **recording**: `ffmpeg -f avfoundation -i ":<default input device>"` to a
     16 kHz mono WAV in the temp dir. A start chime is played *first* and
     recording begins when it ends, so the chime is not captured. Stopping sends
@@ -124,7 +127,7 @@ immediately and loads the model in a background thread, so clients can tell
     `Content-Type: audio/wav`;
   - **delivery**: text + trailing space → pasteboard, then a simulated ⌘V
     (`hs.eventtap.keyStroke`, requires Accessibility) if auto-paste is on, and a
-    brief on-screen overlay with the pasted text.
+    small toast at the top of the screen with the pasted text (optional).
 
 Why Hammerspoon rather than a Python menu-bar app? Global hotkeys, menu-bar
 items, pasteboard and synthetic keystrokes all need a proper Cocoa app with

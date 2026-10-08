@@ -91,8 +91,8 @@ works in any app:
    mic turns into a red **● 0:03** timer.
 2. Speak.
 3. Press **⌃⌥D** again. The audio goes to the local server, the text is copied
-   to your clipboard and pasted at your cursor. A small overlay shows what was
-   pasted.
+   to your clipboard and pasted at your cursor. A small toast at the top of the
+   screen confirms what was pasted (can be turned off from the menu).
 
 Press **Esc** while recording to cancel. Recordings that are silent, or where
 Whisper only produced one of its well-known "noise" phrases, are discarded
@@ -100,16 +100,19 @@ instead of pasted.
 
 ### The menu-bar indicator
 
-| Icon        | Meaning                                                    |
-|-------------|------------------------------------------------------------|
-| 🎙          | Server running, model loaded — ready to dictate            |
-| 🎙 ⏳       | Server starting, Whisper model still loading               |
-| 🎙 off      | Server not running (click → **Start server**)              |
-| ● 0:07      | Recording (red). Press ⌃⌥D to stop, Esc to cancel          |
-| 🎙 ✍️       | Transcribing                                               |
+A small monochrome microphone that follows the menu bar's light/dark style:
+
+| Indicator            | Meaning                                                  |
+|----------------------|----------------------------------------------------------|
+| mic                  | Server running, model loaded — ready to dictate          |
+| mic, dimmed          | Server starting, Whisper model still loading             |
+| mic with a slash     | Server not running (click → **Start server**)            |
+| red **● 0:07**       | Recording. Press ⌃⌥D to stop, Esc to cancel              |
+| mic followed by …    | Transcribing                                             |
 
 Click it for the language picker, an "auto-paste" toggle (off = clipboard
-only), the web app, the transcripts folder, the server log, and server restart.
+only), the on-screen confirmation toggle, the web app, the transcripts folder,
+the server log, and server restart.
 
 ### What the installer sets up
 
