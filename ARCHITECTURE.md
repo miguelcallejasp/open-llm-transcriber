@@ -35,6 +35,17 @@ way it is.
 Nothing leaves the machine: the browser talks only to `127.0.0.1`, and the
 model runs locally.
 
+A second, optional client — the **system-wide dictation hotkey** — reuses the
+same server (see [System-wide dictation](#system-wide-dictation-macos)):
+
+```
+⌃⌥D ──► Hammerspoon (hammerspoon/dictation.lua)
+          │  ffmpeg -f avfoundation  → /tmp/olt-dictation-*.wav
+          │  curl POST /transcribe   (Content-Type: audio/wav)
+          ▼
+        server.py ──► { text } ──► clipboard ──► ⌘V into the frontmost app
+```
+
 ## Components
 
 ### Front-end — `web/`
@@ -60,18 +71,70 @@ A subclass of `http.server.SimpleHTTPRequestHandler` served by a
   writes the bytes to a temp file, runs Whisper, persists the transcript, and
   returns JSON. The temp file is always cleaned up in a `finally` block.
 
+### Health — `GET /health`
+Returns `{ "ready": bool, "model": "<name>" }`. The server binds its port
+immediately and loads the model in a background thread, so clients can tell
+"starting" from "offline". `POST /transcribe` answers `503` until `ready`.
+
 ## Request lifecycle (`POST /transcribe`)
 
-1. Browser sends raw WebM audio bytes with an `X-Language` header
-   (`auto`, `en`, `es`, …).
+1. Client sends raw audio bytes with an `X-Language` header (`auto`, `en`,
+   `es`, …). The browser sends WebM as `application/octet-stream`; the
+   dictation hotkey sends `audio/wav`.
 2. Server validates `Content-Length` (rejects empty / oversized requests).
-3. Bytes are written to a temporary `.webm` file.
-4. `MODEL.transcribe(...)` runs with word timestamps and silence-hallucination
-   filtering enabled. Whisper invokes **ffmpeg** internally to decode the audio.
-5. The result text is trimmed and written to
+3. Bytes are written to a temporary file whose suffix follows the
+   `Content-Type` (`.wav`, `.webm`, …) so ffmpeg gets a good hint.
+4. The file is decoded with **ffmpeg** (`whisper.load_audio`) and its loudness
+   is measured. If even the loudest 10 % of 100 ms windows sit below
+   `WHISPER_SILENCE_DBFS`, the request is answered with empty text and Whisper
+   is never run — otherwise Whisper confidently invents stock phrases for
+   silence.
+5. `MODEL.transcribe(...)` runs on the decoded samples with word timestamps and
+   silence-hallucination filtering enabled.
+6. If the whole result is one of Whisper's well-known silence hallucinations
+   (`HALLUCINATION_PHRASES`), it is dropped and empty text is returned.
+7. Otherwise the text is trimmed and written to
    `transcripts/<YYYY-MM-DD_HH-MM-SS>.txt`.
-6. Server responds `{ "text", "language", "saved" }`; on error it responds with
-   a JSON `{ "error" }` and an appropriate status code.
+8. Server responds `{ "text", "language", "saved" }` (`saved` is `null` when
+   nothing was transcribed); on error it responds with a JSON `{ "error" }` and
+   an appropriate status code.
+
+## System-wide dictation (macOS)
+
+`install-dictation.sh` adds two pieces around the unchanged server:
+
+- **launchd agent** — `~/Library/LaunchAgents/com.openllmtranscriber.server.plist`
+  runs `.venv/bin/python server.py` with `RunAtLoad` + `KeepAlive`, so the model
+  is loaded once at login and stays warm. stdout/stderr go to `logs/server.log`.
+  The web app keeps working against this same instance.
+- **Hammerspoon** — `hammerspoon/dictation.lua` is loaded from
+  `~/.hammerspoon/init.lua`. It owns:
+  - the **⌃⌥D** hotkey (toggle: start / stop) and **Esc** to cancel while
+    recording;
+  - the **menu-bar item**, which polls `GET /health` every 5 s and shows a
+    monochrome mic glyph (drawn with `hs.canvas`, exported as a template image
+    so macOS tints it for light/dark menu bars): full = ready, dimmed =
+    loading, slashed = offline; red `● m:ss` text while recording and `…`
+    while transcribing. Its menu offers language, auto-paste and toast
+    toggles, open web app, transcripts, server log, and restart server via
+    `launchctl kickstart`;
+  - **recording**: `ffmpeg -f avfoundation -i ":<default input device>"` to a
+    16 kHz mono WAV in the temp dir. A start chime is played *first* and
+    recording begins when it ends, so the chime is not captured. Stopping sends
+    `SIGINT` so ffmpeg finalizes the WAV header (ffmpeg exits 255 in that case,
+    so success is judged by the file, not the exit code);
+  - **transcription**: `curl --data-binary @file` to `/transcribe` with
+    `Content-Type: audio/wav`;
+  - **delivery**: text + trailing space → pasteboard, then a simulated ⌘V
+    (`hs.eventtap.keyStroke`, requires Accessibility) if auto-paste is on, and a
+    small toast at the top of the screen with the pasted text (optional).
+
+Why Hammerspoon rather than a Python menu-bar app? Global hotkeys, menu-bar
+items, pasteboard and synthetic keystrokes all need a proper Cocoa app with
+Accessibility entitlement; Hammerspoon is that app, is scriptable in ~400 lines
+of Lua, and needs no extra Python dependencies. Why ffmpeg for capture? It is
+already a hard dependency of Whisper and reads the mic directly via
+AVFoundation, so no new native audio library is needed.
 
 ## Configuration & extension points
 
@@ -81,6 +144,8 @@ A subclass of `http.server.SimpleHTTPRequestHandler` served by a
 | Port        | `WHISPER_PORT` env var                    | `8765`      |
 | Model       | `WHISPER_MODEL` env var                   | `turbo`     |
 | Hallucination silence | `WHISPER_HALLUCINATION_SILENCE_THRESHOLD` env var | `2.0` seconds |
+| Silence floor | `WHISPER_SILENCE_DBFS` env var            | `-32` dBFS  |
+| Dictation hotkey | `config.hotkey` in `hammerspoon/dictation.lua` | ⌃⌥D |
 | Languages   | `<select id="language">` in `index.html`  | auto/en/es  |
 
 Whisper models (swap via `WHISPER_MODEL`):

@@ -11,6 +11,8 @@ browser, transcribe it on your own machine with OpenAI's
 - 🌍 Language picker (Auto-detect / English / Spanish — easy to extend)
 - 💾 Every transcription auto-saved to `transcripts/` with a timestamp
 - 🖥️ Optional one-click macOS Dock app
+- ⌨️ **System-wide dictation**: press **⌃⌥D** in any app, speak, press again —
+  the text is pasted where your cursor is, with a 🎙 menu-bar indicator
 
 ---
 
@@ -28,6 +30,14 @@ When it finishes, drag `Open LLM Transcriber.app` onto your Dock — from then o
 click launches the server and opens the app in your browser.
 
 > Prefer to do it by hand, or on Linux? See [Manual install](#manual-install).
+
+Want it everywhere, not just in the browser? Add the dictation hotkey:
+
+```bash
+./install-dictation.sh
+```
+
+See [System-wide dictation](#system-wide-dictation-d) for what that sets up.
 
 ---
 
@@ -69,6 +79,64 @@ recording after the first is fast. For a deeper dive see
 2. Click **Record** (or press **Spacebar**) → speak → click **Stop**.
 3. Click **Send** to transcribe.
 4. **Copy** the result — it's also saved to `transcripts/<timestamp>.txt`.
+
+---
+
+## System-wide dictation (⌃⌥D)
+
+`install-dictation.sh` turns the transcriber into a macOS dictation tool that
+works in any app:
+
+1. Press **⌃⌥D** (Control + Option + D). You hear a short chime and the menu-bar
+   mic turns into a red **● 0:03** timer.
+2. Speak.
+3. Press **⌃⌥D** again. The audio goes to the local server, the text is copied
+   to your clipboard and pasted at your cursor. A small toast at the top of the
+   screen confirms what was pasted (can be turned off from the menu).
+
+Press **Esc** while recording to cancel. Recordings that are silent, or where
+Whisper only produced one of its well-known "noise" phrases, are discarded
+instead of pasted.
+
+### The menu-bar indicator
+
+A small monochrome microphone that follows the menu bar's light/dark style:
+
+| Indicator            | Meaning                                                  |
+|----------------------|----------------------------------------------------------|
+| mic                  | Server running, model loaded — ready to dictate          |
+| mic, dimmed          | Server starting, Whisper model still loading             |
+| mic with a slash     | Server not running (click → **Start server**)            |
+| red **● 0:07**       | Recording. Press ⌃⌥D to stop, Esc to cancel              |
+| mic followed by …    | Transcribing                                             |
+
+Click it for the language picker, an "auto-paste" toggle (off = clipboard
+only), the on-screen confirmation toggle, the web app, the transcripts folder,
+the server log, and server restart.
+
+### What the installer sets up
+
+- **A launchd agent** (`~/Library/LaunchAgents/com.openllmtranscriber.server.plist`)
+  that starts `server.py` at login and keeps it running, so the model is always
+  warm. Logs go to `logs/server.log`. The web app at `http://localhost:8765/`
+  keeps working as before — same server.
+- **[Hammerspoon](https://www.hammerspoon.org)** (installed via Homebrew if
+  missing), a free, open-source macOS automation tool. It provides the global
+  hotkey and the menu-bar item by loading `hammerspoon/dictation.lua`; the
+  installer adds one `dofile(...)` line to `~/.hammerspoon/init.lua`.
+- Recording is done by **ffmpeg** from your default input device; the result is
+  posted to the same `POST /transcribe` endpoint the browser uses.
+
+Two one-time macOS permissions are needed, and macOS prompts for both:
+**Accessibility** for Hammerspoon (to press ⌘V for you) and **Microphone**
+(the first time you record).
+
+To change the hotkey or languages, edit the `config` table at the top of
+`hammerspoon/dictation.lua` and pick **Reload Hammerspoon config** from the 🎙
+menu. To remove everything: `./install-dictation.sh --uninstall`.
+
+> If you run `./start.sh` while the agent is running, it simply opens the
+> browser — the agent already owns the port.
 
 ---
 
@@ -125,6 +193,7 @@ All optional, via environment variables:
 | `WHISPER_PORT`                             | `8765`      | Port to listen on                            |
 | `WHISPER_MODEL`                            | `turbo`     | Whisper model (see table below)              |
 | `WHISPER_HALLUCINATION_SILENCE_THRESHOLD`  | `2.0`       | Silence seconds used to reject hallucinations |
+| `WHISPER_SILENCE_DBFS`                     | `-32`       | Loudness floor (dBFS) below which a recording counts as silence |
 
 ```bash
 WHISPER_MODEL=small WHISPER_PORT=9000 .venv/bin/python server.py
@@ -133,6 +202,14 @@ WHISPER_MODEL=small WHISPER_PORT=9000 .venv/bin/python server.py
 Whisper uses word timestamps to discard improbable text after silent periods.
 Lower the hallucination threshold if trailing text persists; raise it if valid
 speech after a pause is omitted.
+
+Whisper also tends to *invent* text for pure silence ("Thank you.", subtitle
+credits, …). The server measures the loudest tenth of each recording and skips
+Whisper entirely when it stays under `WHISPER_SILENCE_DBFS`, returning empty
+text. If quiet speech is being dropped, lower it (e.g. `-40`); if noise still
+produces words, raise it (e.g. `-28`). The level of every request is logged.
+For the launchd agent, set it in the plist's `EnvironmentVariables` or re-run
+`WHISPER_SILENCE_DBFS=-40 ./install-dictation.sh`.
 
 Available models — bigger is more accurate but slower and larger:
 
@@ -174,6 +251,9 @@ running the server and pops your browser at the app.
 ├── server.py            # local HTTP server + Whisper transcription
 ├── start.sh             # launch the server + open the browser (macOS)
 ├── install.sh           # one-line macOS installer
+├── install-dictation.sh # system-wide ⌃⌥D dictation: launchd agent + Hammerspoon
+├── hammerspoon/
+│   └── dictation.lua    # hotkey, menu-bar indicator, record → transcribe → paste
 ├── build-app.sh         # (re)build the macOS Dock app + icon
 ├── requirements.txt     # pinned Python dependencies
 ├── .python-version      # recommended Python version
@@ -184,6 +264,7 @@ running the server and pops your browser at the app.
 │   └── fonts/
 ├── icon/                # Dock app icon artwork
 ├── transcripts/         # saved transcriptions (git-ignored)
+├── logs/                # server.log from the launchd agent (git-ignored)
 ├── ARCHITECTURE.md      # how it all fits together
 └── LICENSE              # MIT
 ```
@@ -209,6 +290,17 @@ transcribed offline, and never uploaded anywhere. Saved transcripts in
   port (and update the URL in `start.sh` if you use it).
 - **Dock icon not updating** → macOS caches icons aggressively. Try
   `sudo rm -rf /Library/Caches/com.apple.iconservices.store && sudo killall Dock Finder`.
+- **⌃⌥D copies but doesn't paste** → Hammerspoon needs Accessibility: System
+  Settings → Privacy & Security → Accessibility → enable Hammerspoon.
+- **Menu bar shows 🎙 off** → the launchd agent isn't running. Click the icon →
+  **Start server**, or check `logs/server.log`. Re-run `./install-dictation.sh`
+  if the plist is missing.
+- **Nothing recorded / "Nothing heard"** → check the Microphone permission for
+  Hammerspoon, and that your default input device is the one you expect
+  (System Settings → Sound → Input). The server log shows each recording's level.
+- **Two menu-bar icons from Hammerspoon** → the hammer icon is Hammerspoon's
+  own; `dictation.lua` hides it on first run, or toggle it in Hammerspoon's
+  preferences.
 
 ---
 

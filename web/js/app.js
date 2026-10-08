@@ -177,6 +177,12 @@ async function transcribe() {
     if (!res.ok || data.error) throw new Error(data.error || "Server error");
 
     output.value = data.text;
+    if (!data.text) {
+      copyBtn.disabled = true;
+      meta.textContent = "";
+      setStatus("No speech detected — nothing to transcribe.");
+      return;
+    }
     copyBtn.disabled = false;
     meta.textContent = `lang: ${data.language} · saved → ${data.saved.split("/").pop()}`;
     setStatus("Done.");
