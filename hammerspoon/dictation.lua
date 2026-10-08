@@ -27,6 +27,11 @@ M.config = {
   minBytes      = 4000,   -- ~0.1 s of 16 kHz mono PCM; anything smaller is "nothing recorded"
   healthEvery   = 5,      -- seconds between /health polls
   curl          = "/usr/bin/curl",
+  -- System sounds (see /System/Library/Sounds). The start chime must be short:
+  -- the mic opens only after `startSoundDelay`, so the chime isn't recorded.
+  startSound      = "Pop",
+  startSoundDelay = 0.3,
+  stopSound       = "Morse",
   languages     = {
     { code = "auto", label = "Auto-detect" },
     { code = "en",   label = "English" },
@@ -68,22 +73,10 @@ M.timers = {}
 
 local function log(fmt, ...) print(string.format("[dictation] " .. fmt, ...)) end
 
--- Play a system sound; `andThen` (optional) runs once it has finished.
--- Recording must not start until the start chime is over, otherwise the mic
--- picks the chime up and it ends up in the audio sent to Whisper.
-local function playSound(name, andThen)
+local function playSound(name)
+  if not name or name == "" then return end
   local ok, s = pcall(hs.sound.getByName, name)
-  if not ok or not s then
-    if andThen then andThen() end
-    return
-  end
-  if andThen then
-    local fired = false
-    local function once() if not fired then fired = true; andThen() end end
-    s:setCallback(once)
-    hs.timer.doAfter(0.6, once)  -- safety net if the callback never fires
-  end
-  s:play()
+  if ok and s then s:play() end
 end
 
 local function notify(title, text)
@@ -338,7 +331,7 @@ end
 
 local function transcribe(path)
   setState("transcribing")
-  playSound("Pop")
+  playSound(M.config.stopSound)
   local args = {
     "-sS", "--max-time", "600",
     "-H", "Content-Type: audio/wav",
@@ -418,14 +411,16 @@ function M.startRecording()
   end
 
   -- Flip to "recording" right away so a second ⌃⌥D during the chime is a
-  -- stop, not a second start; ffmpeg itself launches once the chime is done.
+  -- stop, not a second start; ffmpeg itself launches once the chime is done
+  -- (after startSoundDelay), so the chime never ends up in the recording.
   M.recordingStarted = hs.timer.secondsSinceEpoch()
   M.cancelled = false
   setState("recording")
   M.timers.recording = hs.timer.doEvery(1, refreshTitle)
   if M.escKey then M.escKey:enable() end
 
-  playSound("Tink", function()
+  playSound(M.config.startSound)
+  hs.timer.doAfter(M.config.startSoundDelay, function()
     if M.state ~= "recording" or M.cancelled then  -- stopped/cancelled during the chime
       stopRecordingTimer()
       M.cancelled = false
