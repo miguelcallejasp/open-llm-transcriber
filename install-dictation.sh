@@ -11,6 +11,8 @@
 #
 #   ./install-dictation.sh              install / update
 #   ./install-dictation.sh --uninstall  remove the agent + Hammerspoon hook
+#
+# See README.md → "Installation" and "Decommission" for the full picture.
 set -e
 cd "$(dirname "$0")"
 ROOT="$PWD"
@@ -30,17 +32,52 @@ UID_NUM="$(id -u)"
 
 [ "$(uname)" = "Darwin" ] || fail "This installer is for macOS."
 
+# Restart Hammerspoon so it picks up config changes. (A plain relaunch is more
+# reliable than the `hs` IPC client, which can wedge if a previous call hung.)
+restart_hammerspoon() {
+  if pgrep -xq Hammerspoon; then
+    killall Hammerspoon 2>/dev/null || true
+    sleep 1
+  fi
+  open -a Hammerspoon
+}
+
 # --- Uninstall ----------------------------------------------------------------
 if [ "$1" = "--uninstall" ]; then
   bold "Removing system-wide dictation…"
-  launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null && ok "server agent stopped" || true
-  rm -f "$PLIST" && ok "removed $PLIST"
-  if [ -f "$HS_INIT" ] && grep -qF "$HOOK" "$HS_INIT"; then
-    grep -vF "$HOOK" "$HS_INIT" > "$HS_INIT.tmp" && mv "$HS_INIT.tmp" "$HS_INIT"
-    ok "removed hook from $HS_INIT"
-    command -v hs >/dev/null 2>&1 && hs -c 'hs.reload()' >/dev/null 2>&1 || true
+  pkill -INT -f "olt-(dictation|stream)" 2>/dev/null || true   # any in-flight recording
+  if launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null; then
+    ok "server agent stopped and unloaded"
+  else
+    warn "server agent was not loaded"
   fi
-  echo "Hammerspoon itself was left installed (brew uninstall --cask hammerspoon to remove)."
+  if [ -f "$PLIST" ]; then rm -f "$PLIST"; ok "removed $PLIST"; fi
+  if [ -f "$HS_INIT" ] && grep -qF "$HOOK" "$HS_INIT"; then
+    grep -vF "$HOOK" "$HS_INIT" | grep -vF -- "-- Open LLM Transcriber: ⌃⌥D dictation + menu-bar indicator" > "$HS_INIT.tmp"
+    mv "$HS_INIT.tmp" "$HS_INIT"
+    ok "removed hook from $HS_INIT"
+    if [ ! -s "$HS_INIT" ] || ! grep -q '[^[:space:]]' "$HS_INIT"; then
+      rm -f "$HS_INIT"
+      rmdir "$HS_DIR" 2>/dev/null || true
+      ok "removed empty $HS_INIT"
+    fi
+    if pgrep -xq Hammerspoon; then
+      if [ -f "$HS_INIT" ]; then
+        restart_hammerspoon; ok "Hammerspoon restarted without the dictation hook"
+      else
+        killall Hammerspoon 2>/dev/null || true; ok "Hammerspoon quit (no config left)"
+      fi
+    fi
+  else
+    warn "no Hammerspoon hook found in $HS_INIT"
+  fi
+  rm -rf "${TMPDIR:-/tmp}"/olt-dictation-* "${TMPDIR:-/tmp}"/olt-stream-* 2>/dev/null || true
+  echo
+  echo "Done. Left in place on purpose:"
+  echo "  • Hammerspoon.app            → brew uninstall --cask hammerspoon"
+  echo "  • Hammerspoon permissions    → System Settings → Privacy & Security (Accessibility, Microphone)"
+  echo "  • transcripts/ and logs/     → delete if you don't want to keep them"
+  echo "  • the web app (./start.sh) still works; it never depended on this."
   exit 0
 fi
 
@@ -130,12 +167,8 @@ else
 fi
 
 if pgrep -xq Hammerspoon; then
-  if command -v hs >/dev/null 2>&1 && hs -c 'hs.reload()' >/dev/null 2>&1; then
-    ok "Hammerspoon config reloaded"
-  else
-    warn "Hammerspoon is running but could not be reloaded automatically."
-    warn "Click the Hammerspoon menu-bar icon → Reload Config."
-  fi
+  restart_hammerspoon
+  ok "Hammerspoon restarted with the new config"
 else
   open -a Hammerspoon
   ok "Hammerspoon launched"

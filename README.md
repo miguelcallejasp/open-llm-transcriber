@@ -37,7 +37,7 @@ Want it everywhere, not just in the browser? Add the dictation hotkey:
 ./install-dictation.sh
 ```
 
-See [System-wide dictation](#system-wide-dictation-d) for what that sets up.
+See [Installation](#installation) for what that sets up and [Decommission](#decommission-uninstall) to remove it.
 
 ---
 
@@ -144,29 +144,128 @@ Click it for the language picker, an "auto-paste" toggle (off = clipboard
 only), the on-screen confirmation toggle, the web app, the transcripts folder,
 the server log, and server restart.
 
-### What the installer sets up
+### Installation
 
-- **A launchd agent** (`~/Library/LaunchAgents/com.openllmtranscriber.server.plist`)
-  that starts `server.py` at login and keeps it running, so the model is always
-  warm. Logs go to `logs/server.log`. The web app at `http://localhost:8765/`
-  keeps working as before — same server.
-- **[Hammerspoon](https://www.hammerspoon.org)** (installed via Homebrew if
-  missing), a free, open-source macOS automation tool. It provides the global
-  hotkey and the menu-bar item by loading `hammerspoon/dictation.lua`; the
-  installer adds one `dofile(...)` line to `~/.hammerspoon/init.lua`.
-- Recording is done by **ffmpeg** from your default input device; the result is
-  posted to the same `POST /transcribe` endpoint the browser uses.
+**Prerequisites**
 
-Two one-time macOS permissions are needed, and macOS prompts for both:
-**Accessibility** for Hammerspoon (to press ⌘V for you) and **Microphone**
-(the first time you record).
+- macOS (tested on macOS 26/27, Apple Silicon). The hotkey layer is macOS-only;
+  the web app itself runs anywhere.
+- The base app installed first: `./install.sh` (creates `.venv`, installs
+  ffmpeg and Whisper, downloads the model).
+- [Homebrew](https://brew.sh) if Hammerspoon is not yet installed — the script
+  uses it to install Hammerspoon.
+- About 1.5 GB of RAM while idle: the server keeps the `turbo` model loaded so
+  dictation starts instantly.
 
-To change the hotkey or languages, edit the `config` table at the top of
-`hammerspoon/dictation.lua` and pick **Reload Hammerspoon config** from the 🎙
-menu. To remove everything: `./install-dictation.sh --uninstall`.
+**Steps**
 
-> If you run `./start.sh` while the agent is running, it simply opens the
-> browser — the agent already owns the port.
+```bash
+cd open-llm-transcriber
+./install-dictation.sh
+```
+
+The script is idempotent — re-run it after moving the folder, changing the
+port, or pulling an update. It does, in order:
+
+| # | What                                                                                     | Where                                                           |
+|---|------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
+| 1 | Checks `.venv` and ffmpeg                                                                | this folder                                                     |
+| 2 | Installs **Hammerspoon** if missing (`brew install --cask hammerspoon`)                  | `/Applications/Hammerspoon.app`                                 |
+| 3 | Writes a **launchd agent** that runs `server.py` at login and keeps it alive            | `~/Library/LaunchAgents/com.openllmtranscriber.server.plist`    |
+| 4 | Loads the agent now (`launchctl bootstrap`)                                              | server log → `logs/server.log`                                  |
+| 5 | Adds one `dofile(".../hammerspoon/dictation.lua")` line                                  | `~/.hammerspoon/init.lua`                                       |
+| 6 | Launches (or restarts) Hammerspoon so the 🎙 icon appears                                | menu bar                                                        |
+
+Environment variables set when you run the installer are baked into the agent:
+`WHISPER_PORT=9000 WHISPER_MODEL=small ./install-dictation.sh`.
+
+**One-time macOS permissions** (macOS prompts for both):
+
+1. **Accessibility** → System Settings → Privacy & Security → Accessibility →
+   enable *Hammerspoon*. Needed to press ⌘V for you. Without it the text still
+   lands on the clipboard, it just isn't pasted.
+2. **Microphone** → approve the prompt the first time you press ⌃⌥D. (It is
+   attributed to Hammerspoon, which launches ffmpeg.)
+
+**Verify**
+
+- The menu bar shows a dimmed mic while the model loads (~5 s), then a solid
+  mic. Hover it: "Ready — press ⌃⌥D to dictate".
+- `curl http://localhost:8765/health` → `{"ready": true, "model": "turbo"}`.
+- Click into any text field, press ⌃⌥D, say a sentence, press ⌃⌥D. The text
+  should appear where your cursor is.
+- Something off? `logs/server.log` and `logs/dictation.log` have the story, and
+  the mic menu has **Show server log** and **Hammerspoon console**.
+
+**Day-to-day**
+
+- The server starts automatically at login; Hammerspoon too (set on first run).
+- **Restart server** / **Start server** in the mic menu use `launchctl kickstart`.
+  Equivalent from a shell:
+  ```bash
+  launchctl kickstart -k gui/$(id -u)/com.openllmtranscriber.server   # restart
+  launchctl bootout   gui/$(id -u)/com.openllmtranscriber.server      # stop until next login
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.openllmtranscriber.server.plist  # start again
+  ```
+- After `git pull`: **Restart server** (Python changes) and **Reload Hammerspoon
+  config** (Lua changes) from the mic menu. Re-run `./install-dictation.sh`
+  only if the folder moved or the plist format changed.
+- To change the hotkey, sounds or languages, edit the `config` table at the top
+  of `hammerspoon/dictation.lua`, then **Reload Hammerspoon config**.
+- `./start.sh` still works: if the agent already owns the port it simply opens
+  the browser.
+
+### Decommission (uninstall)
+
+```bash
+./install-dictation.sh --uninstall
+```
+
+This reverses everything the installer did, and nothing else:
+
+| Removed                                                                 | Kept (on purpose)                                   |
+|-------------------------------------------------------------------------|-----------------------------------------------------|
+| The launchd agent is stopped and unloaded; the plist is deleted         | `Hammerspoon.app` (you may use it for other things) |
+| The `dofile(...)` hook is removed from `~/.hammerspoon/init.lua` (the file itself if it is then empty) | Hammerspoon's Accessibility / Microphone permissions |
+| Hammerspoon is restarted without the hook, or quit if no config remains | `transcripts/`, `logs/`, the `.venv`, the model cache |
+| Leftover temp recordings (`olt-dictation-*`, `olt-stream-*`)            | The web app — `./start.sh` keeps working            |
+
+The script is safe to run even if only part of the setup exists (it reports
+what it could not find instead of failing).
+
+**Complete removal**, if you also want the rest gone:
+
+```bash
+brew uninstall --cask hammerspoon        # Hammerspoon itself
+rm -rf ~/.hammerspoon                    # its config dir (only if you don't use it otherwise)
+rm -rf ~/.cache/whisper                  # downloaded Whisper model (~1.5 GB)
+rm -rf logs transcripts                  # your transcripts and logs
+cd .. && rm -rf open-llm-transcriber     # the project, including .venv
+```
+
+Then, optionally, remove Hammerspoon from System Settings → Privacy & Security →
+Accessibility / Microphone, and from Login Items.
+
+**Manual uninstall** (if the script is unavailable, e.g. the folder was deleted
+first):
+
+```bash
+launchctl bootout gui/$(id -u)/com.openllmtranscriber.server
+rm ~/Library/LaunchAgents/com.openllmtranscriber.server.plist
+# then delete the "Open LLM Transcriber" dofile line from ~/.hammerspoon/init.lua
+# and restart Hammerspoon (or quit it).
+```
+
+**Going back to an older version** instead of removing it:
+
+```bash
+git tag                          # list versions: v1.1-dictation, v1.2-streaming, …
+git checkout v1.1-dictation      # e.g. dictation without streaming
+git checkout main                # back to the latest
+```
+
+then **Restart server** and **Reload Hammerspoon config** from the mic menu —
+both load code from this folder, so whatever is checked out is what runs.
 
 ---
 
